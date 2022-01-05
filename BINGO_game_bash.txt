@@ -1,0 +1,294 @@
+#!/bin/bash
+
+
+
+declare -A card			#card is the matrix holding all of the values in positions [x,y,0] and records if the value at that position is marked in [x,y,1]
+declare -A availNum		#availNum is an array holding all the possible numbers that can be called but have not yet been
+declare -A calledNum		#callednUM is an array holding all the numbers that have been called
+
+#returns a random integer in a given range
+#$1 is the smallest possible random integer
+#$2 is the range of the possible selection (max-min)
+randInt () {
+        local final
+        let final=$RANDOM%$2+$1
+        return $final
+}
+
+#fills list availNum with all the integers from 1-75 inclusive
+makeAvailNum () {
+        local i
+        for ((i=0;i<75;i++)) do
+                let availNum[$i]=$i+1
+        done
+}
+
+#returns a randomly selected number from numbers not yet called, and removes the selcted number from list of available numbers
+getRandNum () {
+        local t
+        let t=${#availNum[@]}
+        randInt 0 $t			#this random int is not the number returned, it is the index of availNum which will be returned
+        removeFromAvailNum $?
+        return $?
+}
+
+#returns the value at a given index of availNum then removes that value and shrinks the array
+#$1 is the index in the array to be returned and removed 
+removeFromAvailNum () {
+        local index=$1
+        local val=${availNum[$1]}
+        local t
+        let t=${#availNum[@]}-1
+        availNum[$1]=${availNum[$t]}
+        unset -v availNum[$t]
+        return $val
+}
+
+#prints all of the numbers called so far with the associated letter before it
+printCalledNum () {
+        local i
+        local letters=('L' 'I' 'N' 'U' 'X')
+        local val
+        local letIndex
+        for ((i=0;i<${#calledNum[@]};i++)) do
+                val=${calledNum[$i]}
+                let letIndex=($val-1)/15
+                echo -n ${letters[$letIndex]}
+                if test $val -le 9; then
+                        echo -n '0'
+                fi
+                echo -n $val
+                local final
+                let final=${#calledNum[@]}-1
+                if test ! $i -eq $final; then
+                        echo -n ' '
+                fi
+        done
+        echo ''
+}
+
+#Checks to make sure that the input file is valid. If it is not send the error message to standard error and exit program.
+#$1 is the file to be read in.
+readfile() {
+        # used to keep count of number of lines
+        n=1
+        # used a loop counter
+        i=0
+        filename="$1"
+        # used to check if seedline is valid
+        re='^[0-9]+$'
+        # used for checking uniqness of input
+        listOfItems=()
+
+        # file missing
+        if [ ! -f $filename ]; then
+                echo exit 1. Input file missing or unreadable 2>&1
+                exit 1
+        fi
+
+        while read -r line; do
+                # length of the line
+                size=${#line}
+                # checking seed line
+                if [[ $n -eq 1 && ! $line =~ $re ]] ; then
+                        echo exit 3. Seed line format error 2>&1
+                        exit 3
+                # not on seed line
+                elif [[ ! $n -eq 1 ]] ; then
+                        j=0
+                        # loop through each element in the input
+                        for v in $line; do
+                                # range to determain if the input is valid
+                                greaterThan=$((j*15))
+                                greaterThan=$((greaterThan+1))
+                                lessThan=$((j+1))
+                                lessThan=$((lessThan*15))
+                                # remove 0 infront of number to avoid octal confusion
+                                if [[ ${v:0:1} -eq 0 ]] ; then
+                                        v=${v:1:1}
+                                fi
+                                # check to see if 00 is in the correct spot
+                                if [[ $i -eq 3 && $j -eq 2 ]] ; then
+                                        if [[ ! $v -eq 00 ]] ; then
+                                                echo exit 4. Card format error 2>&1
+                                                exit 4
+                                        fi
+                                # make sure column is in correct range
+                                elif [[ ! $v -ge $greaterThan || ! $v -le $lessThan ]] ; then
+                                        echo exit 4. Card format error  2>&1
+                                        exit 4
+
+                                fi
+                                j=$((j+1))
+                                listOfItems[${#listOfItems[@]}]=$v
+
+                        done
+
+                fi
+                # make sure to count only lines that have characters
+                if [ ! -z "$line" ] ; then
+                        n=$((n+1))
+                else
+			echo exit 4. card format error 2>&1
+			exit 4
+		fi
+                i=$((i+1))
+        done < "$filename"
+
+        n=$((n-1))
+
+        # sort list of items and remove duplicates
+ 	# https://stackoverflow.com/questions/13648410/how-can-i-get-unique-values-from-an-array-in-bash
+        listOfUniq=($(echo "${listOfItems[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
+
+        # file has more than 6 lines
+        if [[ ! $n -eq 6 ]]; then
+                echo exit 2. Input file must have 6 lines  2>&1
+                exit 2
+        fi
+        # file has more than 25 integers in the input
+        if [[ ! ${#listOfItems[@]} -eq 25 ]] ; then
+                echo exit 4. Card format error 2>&1
+                exit 4
+        fi
+        # not every number is unique
+        if [[ ! ${#listOfUniq[@]} -eq 25 ]] ; then
+                echo exit 4. Card format error 2>&1
+                exit 4
+        fi
+}
+
+#checks the three winning conditions, prints winner if true and exits
+checkWin () {
+        local x
+        local y
+        #check if all 4 corners are marked
+        if [[ 1 -eq ${card[0,0,1]} && 1 -eq ${card[0,4,1]} && 1 -eq ${card[4,0,1]} && 1 -eq ${card[4,4,1]} ]]; then
+                echo 'WINNER'
+                exit 0
+        fi
+        # check for rows that are all marked
+        x=0
+        for ((y=0;y<5;y++)) do  #loop columns
+                if [[ $x -eq 5 ]]; then #if we surpass the last row,thEn winning conditions fail
+                        break
+                fi
+                if [[ ! 1 -eq ${card[$x,$y,1]} ]]; then #if the card at that row is not marked, then move to the next row
+                        let x=$x+1 #change to the next row
+                        y=-1 #go back to the first column (reset the check)
+                fi
+                if [[ 4 -eq $y ]]; then #if all the numbers in that row were marked, then winning cond satisfied
+                        echo 'WINNER' # declare winner
+                        exit 0  #end program
+                fi
+        done
+        #check for columns that are all marked
+        y=0
+        for((x=0;x<5;x++)) do #loop rows
+                if [[ $y -eq 5 ]]; then #if we surpass the column, that means the winning cond failed
+                        break
+                fi
+                if [[ ! 1 -eq ${card[$x,$y,1]} ]]; then # if that column had no match, move to the next column
+                        let y=$y+1 #go to the next column
+                        x=-1 #go to the first row (reset the check)
+                fi
+                if [[ 4 -eq x ]]; then
+                        echo 'WINNER' #declare winner
+                        exit 0 #end program
+                fi
+        done
+}
+
+#Reads each line of the testfiles (skipping the L I N U X card title) and enters each bingo number into a 3d matrix, setting each bingo spot as 0 (0 meaning umarked) except the middle space which is a free space and set as 1
+#requires file to be handed to function (read_matrix < file)
+#returns seed for random number generator
+read_matrix () {
+        local i=0
+        local line
+        local j
+        # Ignore the first line
+        read seed
+        while read -r line; do
+                j=0
+                # split on spaces
+                for v in `echo $line`;do
+                        card[$i,$j,0]="$v"
+                        j=$((j+1))
+                done
+                i=$((i+1))
+        done
+	card[2,2,1]=1
+        return $seed
+}
+
+#looks for a position in card holding a given value and sets that positions marked value to 1
+#$1 is the value looking to be marked
+markCard () {
+        local val
+        local i
+        local j
+        local v
+        val=$1
+        for ((i=0;i<5;i++)) do
+                for ((j=0;j<5;j++)) do
+                        if test $val -eq ${card[$i,$j,0]}; then
+                                card[$i,$j,1]=1
+                        fi
+                done
+        done
+}
+
+#prints the card with all of the values and an 'm' next to each marked value
+printCard () {
+        local i
+        local j
+        local val
+        echo 'L   I   N   U   X'
+        for ((i=0;i<5;i++)) do
+                for ((j=0;j<5;j++)) do
+                        val=${card[$i,$j,0]}
+                        echo -n $val
+                        if test ${card[$i,$j,1]}; then
+                                echo -n "m"
+                        fi
+                        if test $i -le 4; then
+                                if test ! ${card[$i,$j,1]}; then
+                                        echo -n ' '
+                                fi
+                                echo -n ' '
+                        fi
+                done
+                echo ''
+        done
+}
+
+#Checks if input file is formated correctly, uses the seed to set random variable and creates card based on file
+readfile $1
+read_matrix < $1
+RANDOM=$?
+
+#creates array of all values 1-75 inclusive
+makeAvailNum
+clear
+
+#prints all numbers called so far and card
+printCalledNum
+printCard
+
+#asks for input, if q is entered the program ends, otherwise a random number is selected, thecard and the list of available numbers is ipdated 
+while test 1; do
+        echo 'enter any key to get a call or q to quit: '
+        read entry
+        if test $entry -a $entry == 'q'; then
+                break
+        fi
+        getRandNum
+        val=$?
+        markCard $val
+        calledNum[${#calledNum[@]}]=$val
+        clear
+        printCalledNum
+        printCard
+        checkWin
+done
+exit 0
